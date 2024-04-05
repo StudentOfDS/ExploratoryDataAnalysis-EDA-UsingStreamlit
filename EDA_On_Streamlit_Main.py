@@ -190,10 +190,15 @@ def visualize_correlation_heatmap(df):
         df (DataFrame): DataFrame containing the dataset.
     """
     st.subheader("Correlation Heatmap")
-    fig, ax = plt.subplots()
-    sns.heatmap(df.corr(), annot=True, cmap='coolwarm', ax=ax)
-    plt.tight_layout()  # Apply tight layout
-    st.pyplot(fig)
+    numerical_columns = df.select_dtypes(include=np.number).columns
+    if len(numerical_columns) == 0:
+        st.write("No numerical columns found in the dataset.")
+    else:
+        corr_matrix = df[numerical_columns].corr()
+        fig, ax = plt.subplots()
+        sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', ax=ax)
+        plt.tight_layout()  # Apply tight layout
+        st.pyplot(fig)
 
 # Main function to run the EDA tool
 def main():
