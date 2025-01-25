@@ -147,12 +147,6 @@ Happy analyzing! 😊
 
 ---
 
-### **How to Use This**
-1. Copy the entire content above.  
-2. Paste it into your `README.md` file.  
-3. Replace placeholders:  
-   - `https://github.com/yourusername/enhanced-eda-tool.git` → Your GitHub repository URL.  
-   - Placeholder images (`https://via.placeholder.com/...`) → Actual screenshots of your tool.  
-4. Save and commit the file to your repository.
+
  
 
