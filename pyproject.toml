@@ -3,20 +3,38 @@ name = "eda-wp"
 version = "0.1.0"
 description = "tool for basic Exploratory Data Analysis"
 authors = [
-    {name = "Your Name",email = "you@example.com"}
+    { name = "Your Name", email = "you@example.com" }
 ]
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = [
-    "streamlit (>=1.45.1,<2.0.0)",
-    "pandas (>=2.3.0,<3.0.0)",
-    "polars (>=1.30.0,<2.0.0)",
-    "numpy (>=2.3.0,<3.0.0)",
-    "plotly (>=6.1.2,<7.0.0)",
-    "xlsxwriter (>=3.2.3,<4.0.0)"
-]
 
+dependencies = [
+    "streamlit >=1.45.1,<2.0.0",
+    "pandas >=2.3.0,<3.0.0",
+    "polars >=1.30.0,<2.0.0",
+    "numpy >=2.3.0,<3.0.0",
+    "plotly >=6.1.2,<7.0.0",
+    "xlsxwriter >=3.2.3,<4.0.0",
+    "openpyxl >=3.1.2,<4.0.0"
+]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]
 build-backend = "poetry.core.masonry.api"
+
+[tool.poetry]
+# Add metadata about your project if needed (optional)
+
+[tool.poetry.dependencies]
+# This block is optional; already handled in [project.dependencies]
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0.0"
+black = ">=23.0.0"
+
+[tool.poetry.requires-plugins]
+poetry-plugin-export = ">=1.9.0"
+
+[tool.poetry-export]
+without-hashes = false
+with = ["main"]
