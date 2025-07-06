@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 altair==5.5.0 ; python_version >= "3.13"
 attrs==25.3.0 ; python_version >= "3.13"
 blinker==1.9.0 ; python_version >= "3.13"
@@ -45,3 +46,17 @@ tzdata==2025.2 ; python_version >= "3.13"
 urllib3==2.4.0 ; python_version >= "3.13"
 watchdog==6.0.0 ; python_version >= "3.13" and platform_system != "Darwin"
 xlsxwriter==3.2.3 ; python_version >= "3.13"
+=======
+streamlit==1.45.1
+pandas==2.3.0
+polars==1.30.0
+numpy==2.3.0
+plotly==6.1.2
+scikit-learn==1.6.0
+scipy==1.16.0
+psutil==7.0.0           
+seaborn==0.13.2        
+matplotlib==3.10.3     
+missingno==0.5.2       
+imbalanced-learn==0.13.0  
+>>>>>>> ca90da431ebf0bb552a46881bf07b752786cfd05
