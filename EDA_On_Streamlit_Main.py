@@ -9,6 +9,8 @@ import logging
 import re
 import time
 import tempfile
+import os
+import glob
 import psutil
 from datetime import datetime
 from typing import List, Tuple, Dict, Optional, Union
@@ -60,17 +62,14 @@ class Constants:
 # Utility Functions
 class Utils:
     @staticmethod
-    @st.cache_data(ttl=3600)
     def get_numerical_columns(df: pd.DataFrame) -> List[str]:
         return [] if df is None or df.empty else df.select_dtypes(include=np.number).columns.tolist()
 
     @staticmethod
-    @st.cache_data(ttl=3600)
     def get_categorical_columns(df: pd.DataFrame) -> List[str]:
         return [] if df is None or df.empty else df.select_dtypes(include=['object', 'category']).columns.tolist()
     
     @staticmethod
-    @st.cache_data(ttl=3600)
     def get_datetime_columns(df: pd.DataFrame) -> List[str]:
         return [] if df is None or df.empty else [col for col in df.columns if pd.api.types.is_datetime64_any_dtype(df[col])]
     
@@ -104,7 +103,6 @@ class Utils:
         return df.memory_usage(deep=True).sum() > Constants.LARGE_FILE_THRESHOLD * 1024 * 1024
     
     @staticmethod
-    @st.cache_data(ttl=3600)
     def get_columns_by_type(df: pd.DataFrame, dtype: str) -> List[str]:
         if df is None or df.empty:
             return []
@@ -565,7 +563,11 @@ class Visualizer:
                 sel = sel[:5]
             
             if sel:
-                sample_size = st.slider('Sample size:', 100, min(2000, len(self.filtered_df)), 500)
+                row_count = len(self.filtered_df)
+                min_val = min(100, row_count)
+                max_val = min(2000, row_count)
+                default_val = min(500, row_count)
+                sample_size = st.slider('Sample size:', min_val, max_val, default_val)
                 with st.spinner('Rendering pair plot…'):
                     fig = px.scatter_matrix(
                         self.filtered_df[sel].sample(sample_size),
@@ -573,7 +575,7 @@ class Visualizer:
                         title='Pairwise Relationships',
                         color=sel[0] if sel else None
                     )
-                st.plotly_chart(fg, use_container_width=True)
+                st.plotly_chart(fig, use_container_width=True)
     
     def _render_correlation_heatmap(self):
         nums = Utils.get_numerical_columns(self.filtered_df)
@@ -1034,60 +1036,74 @@ class ImbalanceHandler:
             return 0
         return np.std(bin_counts) / np.mean(bin_counts)
     
+
     def _apply_classification_method(self, df, target, method, sampling_strategy, use_cat_features):
-        X = df.drop(columns=[target])
-        y = df[target]
-        
-        # Encode categorical features if needed
-        cat_features = None
+        from imblearn.over_sampling import RandomOverSampler, SMOTE, ADASYN, SMOTENC
+        from imblearn.under_sampling import RandomUnderSampler
+        from imblearn.combine import SMOTEENN
+
+        X = df.drop(columns=[target]).copy()
+        y = df[target].copy()
+
+        # 1. Handle Categorical Features Robustly
+        cat_mappings = {}
+        cat_cols = []
+
         if use_cat_features:
             cat_cols = Utils.get_categorical_columns(X)
-            if cat_cols:
-                for col in cat_cols:
-                    le = LabelEncoder()
-                    X[col] = le.fit_transform(X[col].astype(str))
-                cat_features = [i for i, col in enumerate(X.columns) if col in cat_cols]
-        
-        # Apply selected resampling method
+            for col in cat_cols:
+                X[col] = X[col].astype('category')
+                cat_mappings[col] = X[col].cat.categories.copy()
+                X[col] = X[col].cat.codes  # -1 indicates missing/unseen
+
+        # 2. Select Correct Sampler
         if method == 'Random Over-sampling':
-            sampler = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=42)
+            sampler = RandomOverSampler(sampling_strategy=sampling_strategy, random_state=42)
         elif method == 'Random Under-sampling':
             sampler = RandomUnderSampler(sampling_strategy=sampling_strategy, random_state=42)
         elif method == 'SMOTE':
-            if cat_features:
-                sampler = SMOTENC(categorical_features=cat_features, 
-                                 sampling_strategy=sampling_strategy, 
-                                 random_state=42)
+            if cat_cols:
+                cat_indices = [X.columns.get_loc(c) for c in cat_cols]
+                sampler = SMOTENC(categorical_features=cat_indices, sampling_strategy=sampling_strategy, random_state=42)
             else:
                 sampler = SMOTE(sampling_strategy=sampling_strategy, random_state=42)
         elif method == 'ADASYN':
             sampler = ADASYN(sampling_strategy=sampling_strategy, random_state=42)
         elif method == 'SMOTEENN':
-            if cat_features:
-                smote = SMOTENC(categorical_features=cat_features, 
-                               sampling_strategy=sampling_strategy, 
-                               random_state=42)
+            if cat_cols:
+                cat_indices = [X.columns.get_loc(c) for c in cat_cols]
+                smote = SMOTENC(categorical_features=cat_indices, sampling_strategy=sampling_strategy, random_state=42)
                 sampler = SMOTEENN(smote=smote, random_state=42)
             else:
                 sampler = SMOTEENN(sampling_strategy=sampling_strategy, random_state=42)
         else:
             return df
-        
-        X_res, y_res = sampler.fit_resample(X, y)
-        
-        # Convert back to DataFrame
+
+        # 3. Resample (with guards)
+        try:
+            X_res, y_res = sampler.fit_resample(X, y)
+        except Exception as e:
+            st.error(f"Resampling failed: {e}. Try adjusting sampling_strategy or handling NaNs.")
+            return df
+
+        # 4. Reconstruct DataFrame
         df_resampled = pd.DataFrame(X_res, columns=X.columns)
         df_resampled[target] = y_res
-        
-        # Convert encoded categoricals back to original
-        if use_cat_features and cat_cols:
-            for col in cat_cols:
-                le = LabelEncoder()
-                le.fit(df[col].astype(str))
-                df_resampled[col] = le.inverse_transform(df_resampled[col].astype(int))
-        
+
+        # 5. Decode Categorical Features safely
+        for col in cat_cols:
+            if col in df_resampled.columns:
+                # SMOTE can produce floats; round to nearest integer safely
+                codes = pd.to_numeric(df_resampled[col], errors='coerce').round().fillna(-1).astype(int)
+                n_cats = len(cat_mappings[col])
+                codes = codes.clip(0, n_cats - 1)
+                # Use pandas Categorical to map back; replace -1 with NaN afterwards
+                cats = list(cat_mappings[col])
+                df_resampled[col] = pd.Categorical.from_codes(codes.where(codes >= 0, 0).astype(int), categories=cats)
+                # set -1 values to NaN
+                df_resampled.loc[codes == -1, col] = np.nan
+
         return df_resampled
-    
     def _apply_regression_method(self, df, target, method, 
                                 rare_min=None, rare_max=None, relevance_factor=2.0,
                                 k_neighbors=5, noise_level=0.1,
@@ -1320,18 +1336,38 @@ class EnhancedEDA:
             unsafe_allow_html=True
         )
     
+
     def _save_state(self, action: str):
-        if st.session_state.df is not None:
+        if st.session_state.get("df", None) is not None:
+            if "history" not in st.session_state:
+                st.session_state.history = []
+            # Manage history size
             if len(st.session_state.history) >= Constants.MAX_HISTORY_SIZE:
-                st.session_state.history.pop(0)
-            
-            timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-            st.session_state.history.append({
-                'df': st.session_state.df.copy(),
-                'action': action,
-                'timestamp': timestamp
-            })
-    
+                oldest = st.session_state.history.pop(0)
+                if 'file_path' in oldest and os.path.exists(oldest['file_path']):
+                    try:
+                        os.remove(oldest['file_path'])
+                    except OSError:
+                        pass
+
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            temp_dir = tempfile.gettempdir()
+            fname = f"eda_snap_{timestamp}_{int(time.time())}.parquet"
+            file_path = os.path.join(temp_dir, fname)
+
+            try:
+                save_df = st.session_state.df.copy()
+                for col in save_df.select_dtypes(include=['object']).columns:
+                    save_df[col] = save_df[col].astype(str)
+                save_df.to_parquet(file_path, index=False)
+                st.session_state.history.append({
+                    'file_path': file_path,
+                    'action': action,
+                    'timestamp': datetime.now().strftime('%H:%M:%S'),
+                    'shape': st.session_state.df.shape
+                })
+            except Exception as e:
+                logging.error(f"Failed to save history snapshot: {e}")
     def display_info(self):
         df = st.session_state.df
         if df is None or df.empty:
@@ -1481,7 +1517,15 @@ class EnhancedEDA:
             st.sidebar.subheader('History')
             for i, entry in enumerate(reversed(st.session_state.history)):
                 if st.sidebar.button(f"{i+1}. {entry['action']} ({entry['timestamp']})"):
-                    st.session_state.df = entry['df']
+                    if 'file_path' in entry:
+                        try:
+                            st.session_state.df = pd.read_parquet(entry['file_path'])
+                        except Exception:
+                            st.error('Could not restore state (snapshot file missing or corrupted).')
+                        else:
+                            st.session_state.df = pd.read_parquet(entry['file_path'])
+                    else:
+                        st.session_state.df = entry.get('df')
                     st.rerun()
 
 if __name__ == '__main__':
